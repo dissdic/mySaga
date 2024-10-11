@@ -5,6 +5,7 @@ import org.springframework.beans.MutablePropertyValues;
 import org.springframework.beans.PropertyValue;
 import org.springframework.beans.PropertyValues;
 import org.springframework.beans.factory.*;
+import org.springframework.beans.factory.annotation.InjectionMetadata;
 import org.springframework.beans.factory.config.*;
 import org.springframework.beans.factory.support.MergedBeanDefinitionPostProcessor;
 import org.springframework.beans.factory.support.RootBeanDefinition;
@@ -100,59 +101,82 @@ public class SagaAnnotationPostProcessor
 
 
         MutablePropertyValues mutablePropertyValues = new MutablePropertyValues(pvs);
-        for (PropertyValue pv : mutablePropertyValues) {
-            Object value = pv.getValue();
-            if(value!=null){
-                Object newValue = createProxy(value);
-                if(newValue!=value){
-                    mutablePropertyValues.add(pv.getName(), newValue);
-                }
-            }
-        }
+        Class<?> clazz = bean.getClass();
 
         return mutablePropertyValues;
+    }
+
+    private void findAnnotatedFields(Class<?> clazz,Object bean){
+
+        List<InjectionMetadata.InjectedElement> elements = new ArrayList<>();
+        Class<?> targetClazz = clazz;
+        do {
+            ReflectionUtils.doWithLocalFields(targetClazz,field -> {
+                if(field.isAnnotationPresent(SagaAction.class)){
+                    Object obj = ReflectionUtils.getField(field,bean);
+                    if(obj==null){
+                        Object value = beanFactory.getBean(field.getType());
+                        value = doCreateProxy(field.getAnnotation(SagaAction.class),value);
+
+                    }else{
+                        Object value = doCreateProxy(field.getAnnotation(SagaAction.class),obj);
+
+                    }
+                }
+            });
+            targetClazz = targetClazz.getSuperclass();
+        }while(targetClazz!=null);
+    }
+
+    private Object doCreateProxy(SagaAction sagaAction, Object object){
+        Method[] methods = sagaAction.methods();
+        Class<?> clazz = object.getClass();
+        Enhancer enhancer = new Enhancer();
+        enhancer.setSuperclass(clazz);
+
+        enhancer.setCallback(new MethodInterceptor() {
+            @Override
+            public Object intercept(Object obj, java.lang.reflect.Method method, Object[] args, MethodProxy proxy) throws Throwable {
+                String currentMethodName = method.getName();
+                Method annotateMethod = Arrays.stream(methods).filter(c->currentMethodName.equals(c.name())).findFirst().orElse(null);
+                if(annotateMethod != null){
+                    try {
+                        return retry(()->method.invoke(object,args),annotateMethod.retry());
+                    }catch (SagaWrapperException e){
+                        Exception ex = e.getWrappedException();
+                        ex.printStackTrace();
+                        //调用回滚方法
+                        java.lang.reflect.Method method1 = ReflectionUtils.findMethod(clazz,annotateMethod.rollbackMethodFullName());
+                        if(method1!=null){
+                            ReflectionUtils.makeAccessible(method1);
+                            Parameter[] parameters = method1.getParameters();
+                            if(parameters.length>0){
+                                ReflectionUtils.invokeMethod(method1,object,args);
+                            }else{
+                                ReflectionUtils.invokeMethod(method1,object);
+                            }
+                            //回滚后返回null
+                            return null;
+                        }else{
+                            throw new SagaWrapperException("no rollback method found");
+                        }
+                    }
+                }
+                return method.invoke(object,args);
+            }
+        });
+        return enhancer.create();
     }
 
     private Object createProxy(Object object){
         SagaAction sagaAction = object.getClass().getAnnotation(SagaAction.class);
         if(sagaAction != null){
-            Method[] methods = sagaAction.methods();
-            Class<?> clazz = object.getClass();
-            Enhancer enhancer = new Enhancer();
-            enhancer.setSuperclass(clazz);
+            return doCreateProxy(sagaAction,object);
+        }else{
 
-            enhancer.setCallback(new MethodInterceptor() {
-                @Override
-                public Object intercept(Object obj, java.lang.reflect.Method method, Object[] args, MethodProxy proxy) throws Throwable {
-                    String currentMethodName = method.getName();
-                    Method annotateMethod = Arrays.stream(methods).filter(c->currentMethodName.equals(c.name())).findFirst().orElse(null);
-                    if(annotateMethod != null){
-                        try {
-                            return retry(()->method.invoke(object,args),annotateMethod.retry());
-                        }catch (SagaWrapperException e){
-                            Exception ex = e.getWrappedException();
-                            ex.printStackTrace();
-                            //调用回滚方法
-                            java.lang.reflect.Method method1 = ReflectionUtils.findMethod(clazz,annotateMethod.rollbackMethodFullName());
-                            if(method1!=null){
-                                ReflectionUtils.makeAccessible(method1);
-                                Parameter[] parameters = method1.getParameters();
-                                if(parameters.length>0){
-                                    ReflectionUtils.invokeMethod(method1,object,args);
-                                }else{
-                                    ReflectionUtils.invokeMethod(method1,object);
-                                }
-                                //回滚后返回null
-                                return null;
-                            }else{
-                                throw new SagaWrapperException("no rollback method found");
-                            }
-                        }
-                    }
-                    return method.invoke(object,args);
-                }
-            });
-            return enhancer.create();
+            ReflectionUtils.doWithMethods(object.getClass(),method -> {
+
+            },method -> method.isAnnotationPresent(SagaAction.class));
         }
         return object;
     }

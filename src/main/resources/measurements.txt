@@ -1,0 +1,8 @@
+shanghai;40.1;
+beijing:37.8;
+nanjing:35.2;
+shanghai:36.1;
+shanghai:45.0;
+beijing:21.9;
+nanjing:26.0;
+beijing:23.2;

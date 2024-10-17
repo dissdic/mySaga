@@ -18,8 +18,13 @@ import org.springframework.context.EnvironmentAware;
 import org.springframework.context.ResourceLoaderAware;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ResourceLoader;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.ReflectionUtils;
 
+import java.beans.PropertyDescriptor;
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Field;
+import java.lang.reflect.Member;
 import java.lang.reflect.Parameter;
 import java.util.*;
 import java.util.concurrent.Callable;
@@ -100,32 +105,39 @@ public class SagaAnnotationPostProcessor
     public PropertyValues postProcessProperties(PropertyValues pvs, Object bean, String beanName) throws BeansException {
 
 
-        MutablePropertyValues mutablePropertyValues = new MutablePropertyValues(pvs);
-        Class<?> clazz = bean.getClass();
-
-        return mutablePropertyValues;
+        InjectionMetadata metadata = findAnnotatedFields(bean);
+        try {
+            metadata.inject(bean,beanName,pvs);
+        } catch (Throwable throwable) {
+            throw new SagaWrapperException("creation or injection of proxy object fail");
+        }
+        return pvs;
     }
 
-    private void findAnnotatedFields(Class<?> clazz,Object bean){
-
+    private InjectionMetadata findAnnotatedFields(Object bean){
+        Class<?> clazz = bean.getClass();
         List<InjectionMetadata.InjectedElement> elements = new ArrayList<>();
+        InjectionMetadata injectionMetadata = new InjectionMetadata(clazz,elements);
         Class<?> targetClazz = clazz;
         do {
             ReflectionUtils.doWithLocalFields(targetClazz,field -> {
                 if(field.isAnnotationPresent(SagaAction.class)){
+                    //可能需要考虑private protect
                     Object obj = ReflectionUtils.getField(field,bean);
+                    Object value = null;
                     if(obj==null){
-                        Object value = beanFactory.getBean(field.getType());
-                        value = doCreateProxy(field.getAnnotation(SagaAction.class),value);
-
+                        value = doCreateProxy(field.getAnnotation(SagaAction.class),beanFactory.getBean(field.getType()));
                     }else{
-                        Object value = doCreateProxy(field.getAnnotation(SagaAction.class),obj);
-
+                        value = doCreateProxy(field.getAnnotation(SagaAction.class),obj);
                     }
+                    SagaAnnotationInjectedElement element = new SagaAnnotationInjectedElement(field, value);
+                    elements.add(element);
                 }
             });
             targetClazz = targetClazz.getSuperclass();
         }while(targetClazz!=null);
+
+        return injectionMetadata;
     }
 
     private Object doCreateProxy(SagaAction sagaAction, Object object){
@@ -143,23 +155,8 @@ public class SagaAnnotationPostProcessor
                     try {
                         return retry(()->method.invoke(object,args),annotateMethod.retry());
                     }catch (SagaWrapperException e){
-                        Exception ex = e.getWrappedException();
-                        ex.printStackTrace();
-                        //调用回滚方法
-                        java.lang.reflect.Method method1 = ReflectionUtils.findMethod(clazz,annotateMethod.rollbackMethodFullName());
-                        if(method1!=null){
-                            ReflectionUtils.makeAccessible(method1);
-                            Parameter[] parameters = method1.getParameters();
-                            if(parameters.length>0){
-                                ReflectionUtils.invokeMethod(method1,object,args);
-                            }else{
-                                ReflectionUtils.invokeMethod(method1,object);
-                            }
-                            //回滚后返回null
-                            return null;
-                        }else{
-                            throw new SagaWrapperException("no rollback method found");
-                        }
+                        doRollback(e,object.getClass(),annotateMethod.rollbackMethodFullName(),object,args);
+                        return null;
                     }
                 }
                 return method.invoke(object,args);
@@ -168,15 +165,63 @@ public class SagaAnnotationPostProcessor
         return enhancer.create();
     }
 
+    public void doRollback(SagaWrapperException e, Class<?> clazz, String rollbackMethodName,Object object, Object[] args){
+        Exception ex = e.getWrappedException();
+        ex.printStackTrace();
+        //调用回滚方法
+        java.lang.reflect.Method method1 = ReflectionUtils.findMethod(clazz,rollbackMethodName);
+        if(method1!=null){
+            ReflectionUtils.makeAccessible(method1);
+            Parameter[] parameters = method1.getParameters();
+            if(parameters.length>0){
+                ReflectionUtils.invokeMethod(method1,object,args);
+            }else{
+                ReflectionUtils.invokeMethod(method1,object);
+            }
+        }else{
+            throw new SagaWrapperException("no rollback method found");
+        }
+    }
+
     private Object createProxy(Object object){
         SagaAction sagaAction = object.getClass().getAnnotation(SagaAction.class);
         if(sagaAction != null){
             return doCreateProxy(sagaAction,object);
         }else{
 
-            ReflectionUtils.doWithMethods(object.getClass(),method -> {
-
-            },method -> method.isAnnotationPresent(SagaAction.class));
+            List<java.lang.reflect.Method> methods = new ArrayList<>();
+            Class<?> targetClass = object.getClass();
+            do{
+                ReflectionUtils.doWithLocalMethods(targetClass,method -> {
+                    Annotation annotation = method.getAnnotation(SagaAction.class);
+                    if(annotation!=null){
+                        methods.add(method);
+                    }
+                });
+                targetClass = targetClass.getSuperclass();
+            }while (targetClass!=null);
+            if(!CollectionUtils.isEmpty(methods)){
+                //生成代理
+                Enhancer enhancer = new Enhancer();
+                enhancer.setSuperclass(object.getClass());
+                enhancer.setCallback(new MethodInterceptor() {
+                    @Override
+                    public Object intercept(Object o, java.lang.reflect.Method method, Object[] objects, MethodProxy methodProxy) throws Throwable {
+                        java.lang.reflect.Method matchMethod = methods.stream().takeWhile(c->c.equals(method)).findFirst().orElse(null);
+                        if(matchMethod!=null){
+                            SagaAction action = matchMethod.getAnnotation(SagaAction.class);
+                            try {
+                                return retry(()->method.invoke(object,objects),action.retry());
+                            }catch (SagaWrapperException e){
+                                doRollback(e,object.getClass(),action.rollbackMethodFullName(),object,objects);
+                                return null;
+                            }
+                        }
+                        return method.invoke(object,objects);
+                    }
+                });
+                return enhancer.create();
+            }
         }
         return object;
     }
@@ -191,6 +236,23 @@ public class SagaAnnotationPostProcessor
             }else{
                 throw new SagaWrapperException(e);
             }
+        }
+    }
+
+    private static class SagaAnnotationInjectedElement extends InjectionMetadata.InjectedElement {
+
+        private final Object proxy;
+
+        protected  SagaAnnotationInjectedElement(Field field,Object proxy){
+            super(field, null);
+            this.proxy = proxy;
+        }
+
+
+        @Override
+        protected void inject(Object target, String requestingBeanName, PropertyValues pvs) throws Throwable {
+            ReflectionUtils.makeAccessible((Field) member);
+            ReflectionUtils.setField((Field) member,target,proxy);
         }
     }
 

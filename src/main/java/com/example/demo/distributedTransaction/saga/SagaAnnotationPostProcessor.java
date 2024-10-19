@@ -34,23 +34,17 @@ import java.util.concurrent.Callable;
  */
 public class SagaAnnotationPostProcessor
         implements
-        EnvironmentAware,
-        ResourceLoaderAware,
-        BeanClassLoaderAware,
-        ApplicationContextAware,
         InstantiationAwareBeanPostProcessor,
-        MergedBeanDefinitionPostProcessor,
         BeanFactoryAware,
         DisposableBean,
         InitializingBean {
 
-    private ClassLoader classLoader;
-    private Environment environment;
-    private ResourceLoader resourceLoader;
-    private ApplicationContext applicationContext;
     private BeanFactory beanFactory;
 
     private Set<String> packages;
+
+    private static ThreadLocal<SagaTransaction> actions;
+
     public SagaAnnotationPostProcessor(Collection<String> packages) {
         this.packages  = new LinkedHashSet<>(packages);
     }
@@ -60,25 +54,7 @@ public class SagaAnnotationPostProcessor
         System.out.println("all the properties have been set");
     }
 
-    @Override
-    public void setBeanClassLoader(ClassLoader classLoader) {
-        this.classLoader = classLoader;
-    }
 
-    @Override
-    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
-        this.applicationContext = applicationContext;
-    }
-
-    @Override
-    public void setEnvironment(Environment environment) {
-        this.environment = environment;
-    }
-
-    @Override
-    public void setResourceLoader(ResourceLoader resourceLoader) {
-        this.resourceLoader = resourceLoader;
-    }
 
     @Override
     public void setBeanFactory(BeanFactory beanFactory) throws BeansException {
@@ -90,11 +66,6 @@ public class SagaAnnotationPostProcessor
         System.out.println("destroy processor");
     }
 
-    @Override
-    public void postProcessMergedBeanDefinition(RootBeanDefinition beanDefinition, Class<?> beanType, String beanName) {
-
-    }
-
 
     @Override
     public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
@@ -103,7 +74,6 @@ public class SagaAnnotationPostProcessor
 
     @Override
     public PropertyValues postProcessProperties(PropertyValues pvs, Object bean, String beanName) throws BeansException {
-
 
         InjectionMetadata metadata = findAnnotatedFields(bean);
         try {
@@ -228,6 +198,7 @@ public class SagaAnnotationPostProcessor
 
     public Object retry(Callable<Object> callable,int times){
         try{
+            System.out.println("调用");
             return callable.call();
         }catch (Exception e){
             if(times>0){

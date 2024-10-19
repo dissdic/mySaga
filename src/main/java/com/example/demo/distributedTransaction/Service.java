@@ -19,6 +19,7 @@ public class Service {
     @Autowired
     private ServerConfig serverConfig;
 
+    @SagaAction(methods = {@Method(name = "addArbitraryUser",rollbackMethodFullName = "removeUser")})
     @DubboReference(url="dubbo://127.0.0.1:12345",version = "1.0.0")
     private UserService userService;
 

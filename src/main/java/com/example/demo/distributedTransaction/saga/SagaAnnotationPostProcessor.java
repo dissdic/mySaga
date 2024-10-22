@@ -123,7 +123,46 @@ public class SagaAnnotationPostProcessor
                 Method annotateMethod = Arrays.stream(methods).filter(c->currentMethodName.equals(c.name())).findFirst().orElse(null);
                 if(annotateMethod != null){
                     try {
-                        return retry(()->method.invoke(object,args),annotateMethod.retry());
+                        Object result = retry(()->method.invoke(object,args),annotateMethod.retry());
+                        addRollback(clazz,currentMethodName,args);
+                        return result;
+                    }catch (SagaWrapperException e){
+                        doRollback(e,object.getClass(),annotateMethod.rollbackMethodFullName(),object,args);
+                        return null;
+                    }
+                }
+                return method.invoke(object,args);
+            }
+        });
+        return enhancer.create();
+    }
+
+    private SagaAnnotationMetaData ifAnnotationPresent(java.lang.reflect.Method method, Method[] method1, java.lang.reflect.Method[] method2){
+        if(method1!=null && method1.length>0){
+            String currentMethodName = method.getName();
+            Method m = Arrays.stream(method1).filter(c->currentMethodName.equals(c.name())).findFirst().orElse(null);
+            if(m)
+        }
+        if(method2!=null && method2.length>0){
+
+        }
+        return null;
+    }
+
+    private Object doCreateProxy_(){
+        Enhancer enhancer = new Enhancer();
+        enhancer.setSuperclass(clazz);
+
+        enhancer.setCallback(new MethodInterceptor() {
+            @Override
+            public Object intercept(Object obj, java.lang.reflect.Method method, Object[] args, MethodProxy proxy) throws Throwable {
+                String currentMethodName = method.getName();
+                Method annotateMethod = Arrays.stream(methods).filter(c->currentMethodName.equals(c.name())).findFirst().orElse(null);
+                if(annotateMethod != null){
+                    try {
+                        Object result = retry(()->method.invoke(object,args),annotateMethod.retry());
+                        addRollback(clazz,currentMethodName,args);
+                        return result;
                     }catch (SagaWrapperException e){
                         doRollback(e,object.getClass(),annotateMethod.rollbackMethodFullName(),object,args);
                         return null;
@@ -139,6 +178,13 @@ public class SagaAnnotationPostProcessor
         Exception ex = e.getWrappedException();
         ex.printStackTrace();
         //调用回滚方法
+        SagaTransaction sagaTransaction = actions.get();
+        if(sagaTransaction!=null){
+
+        }
+        ArrayDeque<SagaTransaction.Rollback> rollbacks = sagaTransaction.getRollBackChain();
+
+
         java.lang.reflect.Method method1 = ReflectionUtils.findMethod(clazz,rollbackMethodName);
         if(method1!=null){
             ReflectionUtils.makeAccessible(method1);
@@ -152,6 +198,7 @@ public class SagaAnnotationPostProcessor
             throw new SagaWrapperException("no rollback method found");
         }
     }
+
 
     private Object createProxy(Object object){
         SagaAction sagaAction = object.getClass().getAnnotation(SagaAction.class);
@@ -172,6 +219,9 @@ public class SagaAnnotationPostProcessor
             }while (targetClass!=null);
             if(!CollectionUtils.isEmpty(methods)){
                 //生成代理
+                //todo
+                doCreateProxy(sagaAction,object);
+
                 Enhancer enhancer = new Enhancer();
                 enhancer.setSuperclass(object.getClass());
                 enhancer.setCallback(new MethodInterceptor() {
@@ -181,7 +231,9 @@ public class SagaAnnotationPostProcessor
                         if(matchMethod!=null){
                             SagaAction action = matchMethod.getAnnotation(SagaAction.class);
                             try {
-                                return retry(()->method.invoke(object,objects),action.retry());
+                                Object result = retry(()->method.invoke(object,objects),action.retry());
+                                addRollback(object.getClass(),method.getName(),objects);
+                                return result;
                             }catch (SagaWrapperException e){
                                 doRollback(e,object.getClass(),action.rollbackMethodFullName(),object,objects);
                                 return null;
@@ -210,6 +262,24 @@ public class SagaAnnotationPostProcessor
         }
     }
 
+    private void addRollback(Class<?> beanType, String methodName, Object[] args){
+        SagaTransaction.Rollback rollback = new SagaTransaction.Rollback();
+        rollback.setArgs(args);
+        rollback.setClazz(beanType);
+        rollback.setMethodName(methodName);
+
+        SagaTransaction sagaTransaction = actions.get();
+        if(sagaTransaction==null){
+            sagaTransaction = new SagaTransaction();
+            actions.set(sagaTransaction);
+        }
+        //生成一组数字作为事务的唯一标识
+        Long id = System.currentTimeMillis();
+        sagaTransaction.setXid(id);
+        ArrayDeque<SagaTransaction.Rollback> rollbacks = sagaTransaction.getRollBackChain();
+        rollbacks.add(rollback);
+    }
+
     private static class SagaAnnotationInjectedElement extends InjectionMetadata.InjectedElement {
 
         private final Object proxy;
@@ -224,6 +294,32 @@ public class SagaAnnotationPostProcessor
         protected void inject(Object target, String requestingBeanName, PropertyValues pvs) throws Throwable {
             ReflectionUtils.makeAccessible((Field) member);
             ReflectionUtils.setField((Field) member,target,proxy);
+        }
+    }
+
+    private static class SagaAnnotationMetaData{
+        private int retry;
+        private String rollbackMethodFullName;
+
+        SagaAnnotationMetaData(int retry, String rollbackMethodFullName){
+            this.retry = retry;
+            this.rollbackMethodFullName = rollbackMethodFullName;
+        }
+
+        public int getRetry() {
+            return retry;
+        }
+
+        public void setRetry(int retry) {
+            this.retry = retry;
+        }
+
+        public String getRollbackMethodFullName() {
+            return rollbackMethodFullName;
+        }
+
+        public void setRollbackMethodFullName(String rollbackMethodFullName) {
+            this.rollbackMethodFullName = rollbackMethodFullName;
         }
     }
 

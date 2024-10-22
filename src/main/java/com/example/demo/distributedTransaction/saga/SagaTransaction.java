@@ -1,5 +1,6 @@
 package com.example.demo.distributedTransaction.saga;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -8,8 +9,8 @@ import java.util.function.Consumer;
 public class SagaTransaction {
 
     private Long xid;
-
-    private List<Runnable> rollBackChain = new ArrayList<>();
+    //先进后出
+    private ArrayDeque<Rollback> rollBackChain = new ArrayDeque<>();
 
     public Long getXid() {
         return xid;
@@ -19,11 +20,44 @@ public class SagaTransaction {
         this.xid = xid;
     }
 
-    public List<Runnable> getRollBackChain() {
+    public ArrayDeque<Rollback> getRollBackChain() {
         return rollBackChain;
     }
 
-    public void setRollBackChain(List<Runnable> rollBackChain) {
+    public void setRollBackChain(ArrayDeque<Rollback> rollBackChain) {
         this.rollBackChain = rollBackChain;
+    }
+
+    public static class Rollback{
+
+        private Class<?> clazz;
+
+        private String methodName;
+
+        private Object[] args;
+
+        public Class<?> getClazz() {
+            return clazz;
+        }
+
+        public void setClazz(Class<?> clazz) {
+            this.clazz = clazz;
+        }
+
+        public String getMethodName() {
+            return methodName;
+        }
+
+        public void setMethodName(String methodName) {
+            this.methodName = methodName;
+        }
+
+        public Object[] getArgs() {
+            return args;
+        }
+
+        public void setArgs(Object[] args) {
+            this.args = args;
+        }
     }
 }

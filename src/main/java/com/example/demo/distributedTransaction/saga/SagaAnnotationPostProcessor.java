@@ -96,9 +96,9 @@ public class SagaAnnotationPostProcessor
                     Object obj = ReflectionUtils.getField(field,bean);
                     Object value = null;
                     if(obj==null){
-                        value = doCreateProxy(field.getAnnotation(SagaAction.class),beanFactory.getBean(field.getType()));
+                        value = doCreateProxy(field.getAnnotation(SagaAction.class),null,beanFactory.getBean(field.getType()));
                     }else{
-                        value = doCreateProxy(field.getAnnotation(SagaAction.class),obj);
+                        value = doCreateProxy(field.getAnnotation(SagaAction.class),null,obj);
                     }
                     SagaAnnotationInjectedElement element = new SagaAnnotationInjectedElement(field, value);
                     elements.add(element);
@@ -110,8 +110,9 @@ public class SagaAnnotationPostProcessor
         return injectionMetadata;
     }
 
-    private Object doCreateProxy(SagaAction sagaAction, Object object){
-        Method[] methods = sagaAction.methods();
+    private Object doCreateProxy(SagaAction sagaAction, java.lang.reflect.Method[] methods, Object object){
+
+        Method[] methods_ = sagaAction!=null?sagaAction.methods():null;
         Class<?> clazz = object.getClass();
         Enhancer enhancer = new Enhancer();
         enhancer.setSuperclass(clazz);
@@ -119,15 +120,15 @@ public class SagaAnnotationPostProcessor
         enhancer.setCallback(new MethodInterceptor() {
             @Override
             public Object intercept(Object obj, java.lang.reflect.Method method, Object[] args, MethodProxy proxy) throws Throwable {
-                String currentMethodName = method.getName();
-                Method annotateMethod = Arrays.stream(methods).filter(c->currentMethodName.equals(c.name())).findFirst().orElse(null);
-                if(annotateMethod != null){
+
+                SagaAnnotationMetaData data = ifAnnotationPresent(method,methods_,methods);
+                if(data != null){
                     try {
-                        Object result = retry(()->method.invoke(object,args),annotateMethod.retry());
-                        addRollback(clazz,currentMethodName,args);
+                        Object result = retry(()->method.invoke(object,args),data.getRetry());
+                        addRollback(clazz,method.getName(),args);
                         return result;
                     }catch (SagaWrapperException e){
-                        doRollback(e,object.getClass(),annotateMethod.rollbackMethodFullName(),object,args);
+                        doRollback(e,object.getClass(), data.getRollbackMethodFullName(), object,args);
                         return null;
                     }
                 }
@@ -136,42 +137,24 @@ public class SagaAnnotationPostProcessor
         });
         return enhancer.create();
     }
+
 
     private SagaAnnotationMetaData ifAnnotationPresent(java.lang.reflect.Method method, Method[] method1, java.lang.reflect.Method[] method2){
         if(method1!=null && method1.length>0){
             String currentMethodName = method.getName();
-            Method m = Arrays.stream(method1).filter(c->currentMethodName.equals(c.name())).findFirst().orElse(null);
-            if(m)
+            Method matchMethod = Arrays.stream(method1).filter(c->currentMethodName.equals(c.name())).findFirst().orElse(null);
+            if(matchMethod!=null){
+                return new SagaAnnotationMetaData(matchMethod.retry(),matchMethod.rollbackMethodFullName());
+            }
         }
         if(method2!=null && method2.length>0){
-
+            java.lang.reflect.Method matchMethod = Arrays.stream(method2).takeWhile(c->c.equals(method)).findFirst().orElse(null);
+            if(matchMethod!=null){
+                SagaAction action = matchMethod.getAnnotation(SagaAction.class);
+                return new SagaAnnotationMetaData(action.retry(),action.rollbackMethodFullName());
+            }
         }
         return null;
-    }
-
-    private Object doCreateProxy_(){
-        Enhancer enhancer = new Enhancer();
-        enhancer.setSuperclass(clazz);
-
-        enhancer.setCallback(new MethodInterceptor() {
-            @Override
-            public Object intercept(Object obj, java.lang.reflect.Method method, Object[] args, MethodProxy proxy) throws Throwable {
-                String currentMethodName = method.getName();
-                Method annotateMethod = Arrays.stream(methods).filter(c->currentMethodName.equals(c.name())).findFirst().orElse(null);
-                if(annotateMethod != null){
-                    try {
-                        Object result = retry(()->method.invoke(object,args),annotateMethod.retry());
-                        addRollback(clazz,currentMethodName,args);
-                        return result;
-                    }catch (SagaWrapperException e){
-                        doRollback(e,object.getClass(),annotateMethod.rollbackMethodFullName(),object,args);
-                        return null;
-                    }
-                }
-                return method.invoke(object,args);
-            }
-        });
-        return enhancer.create();
     }
 
     public void doRollback(SagaWrapperException e, Class<?> clazz, String rollbackMethodName,Object object, Object[] args){
@@ -203,7 +186,7 @@ public class SagaAnnotationPostProcessor
     private Object createProxy(Object object){
         SagaAction sagaAction = object.getClass().getAnnotation(SagaAction.class);
         if(sagaAction != null){
-            return doCreateProxy(sagaAction,object);
+            return doCreateProxy(sagaAction,null,object);
         }else{
 
             List<java.lang.reflect.Method> methods = new ArrayList<>();
@@ -219,30 +202,7 @@ public class SagaAnnotationPostProcessor
             }while (targetClass!=null);
             if(!CollectionUtils.isEmpty(methods)){
                 //生成代理
-                //todo
-                doCreateProxy(sagaAction,object);
-
-                Enhancer enhancer = new Enhancer();
-                enhancer.setSuperclass(object.getClass());
-                enhancer.setCallback(new MethodInterceptor() {
-                    @Override
-                    public Object intercept(Object o, java.lang.reflect.Method method, Object[] objects, MethodProxy methodProxy) throws Throwable {
-                        java.lang.reflect.Method matchMethod = methods.stream().takeWhile(c->c.equals(method)).findFirst().orElse(null);
-                        if(matchMethod!=null){
-                            SagaAction action = matchMethod.getAnnotation(SagaAction.class);
-                            try {
-                                Object result = retry(()->method.invoke(object,objects),action.retry());
-                                addRollback(object.getClass(),method.getName(),objects);
-                                return result;
-                            }catch (SagaWrapperException e){
-                                doRollback(e,object.getClass(),action.rollbackMethodFullName(),object,objects);
-                                return null;
-                            }
-                        }
-                        return method.invoke(object,objects);
-                    }
-                });
-                return enhancer.create();
+                return doCreateProxy(null,methods.toArray(new java.lang.reflect.Method[0]), object);
             }
         }
         return object;

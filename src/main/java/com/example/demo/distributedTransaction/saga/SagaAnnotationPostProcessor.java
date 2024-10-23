@@ -125,10 +125,10 @@ public class SagaAnnotationPostProcessor
                 if(data != null){
                     try {
                         Object result = retry(()->method.invoke(object,args),data.getRetry());
-                        addRollback(clazz,method.getName(),args);
+                        addRollback(clazz,data.getRollbackMethodFullName(),args,object);
                         return result;
                     }catch (SagaWrapperException e){
-                        doRollback(e,object.getClass(), data.getRollbackMethodFullName(), object,args);
+                        doRollback(e);
                         return null;
                     }
                 }
@@ -157,28 +157,28 @@ public class SagaAnnotationPostProcessor
         return null;
     }
 
-    public void doRollback(SagaWrapperException e, Class<?> clazz, String rollbackMethodName,Object object, Object[] args){
+    public void doRollback(SagaWrapperException e){
         Exception ex = e.getWrappedException();
         ex.printStackTrace();
         //调用回滚方法
         SagaTransaction sagaTransaction = actions.get();
         if(sagaTransaction!=null){
-
-        }
-        ArrayDeque<SagaTransaction.Rollback> rollbacks = sagaTransaction.getRollBackChain();
-
-
-        java.lang.reflect.Method method1 = ReflectionUtils.findMethod(clazz,rollbackMethodName);
-        if(method1!=null){
-            ReflectionUtils.makeAccessible(method1);
-            Parameter[] parameters = method1.getParameters();
-            if(parameters.length>0){
-                ReflectionUtils.invokeMethod(method1,object,args);
-            }else{
-                ReflectionUtils.invokeMethod(method1,object);
+            ArrayDeque<SagaTransaction.Rollback> rollbacks = sagaTransaction.getRollBackChain();
+            while(!rollbacks.isEmpty()){
+                SagaTransaction.Rollback rollback = rollbacks.pop();
+                java.lang.reflect.Method method1 = ReflectionUtils.findMethod(rollback.getClazz(),rollback.getMethodName());
+                if(method1!=null){
+                    ReflectionUtils.makeAccessible(method1);
+                    Parameter[] parameters = method1.getParameters();
+                    if(parameters.length>0){
+                        ReflectionUtils.invokeMethod(method1,rollback.getTarget(),rollback.getArgs());
+                    }else{
+                        ReflectionUtils.invokeMethod(method1,rollback.getTarget());
+                    }
+                }else{
+                    throw new SagaWrapperException("no rollback method found");
+                }
             }
-        }else{
-            throw new SagaWrapperException("no rollback method found");
         }
     }
 
@@ -222,12 +222,12 @@ public class SagaAnnotationPostProcessor
         }
     }
 
-    private void addRollback(Class<?> beanType, String methodName, Object[] args){
+    private void addRollback(Class<?> beanType, String methodName, Object[] args, Object obj){
         SagaTransaction.Rollback rollback = new SagaTransaction.Rollback();
         rollback.setArgs(args);
         rollback.setClazz(beanType);
         rollback.setMethodName(methodName);
-
+        rollback.setTarget(obj);
         SagaTransaction sagaTransaction = actions.get();
         if(sagaTransaction==null){
             sagaTransaction = new SagaTransaction();
@@ -237,7 +237,7 @@ public class SagaAnnotationPostProcessor
         Long id = System.currentTimeMillis();
         sagaTransaction.setXid(id);
         ArrayDeque<SagaTransaction.Rollback> rollbacks = sagaTransaction.getRollBackChain();
-        rollbacks.add(rollback);
+        rollbacks.push(rollback);
     }
 
     private static class SagaAnnotationInjectedElement extends InjectionMetadata.InjectedElement {

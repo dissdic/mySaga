@@ -36,6 +36,8 @@ public class SagaTransaction {
 
         private Object[] args;
 
+        private Object target;
+
         public Class<?> getClazz() {
             return clazz;
         }
@@ -59,5 +61,14 @@ public class SagaTransaction {
         public void setArgs(Object[] args) {
             this.args = args;
         }
+
+        public Object getTarget() {
+            return target;
+        }
+
+        public void setTarget(Object target) {
+            this.target = target;
+        }
+
     }
 }

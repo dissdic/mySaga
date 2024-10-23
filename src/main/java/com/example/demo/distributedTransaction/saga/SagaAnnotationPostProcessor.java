@@ -19,6 +19,7 @@ import org.springframework.context.ResourceLoaderAware;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.NumberUtils;
 import org.springframework.util.ReflectionUtils;
 
 import java.beans.PropertyDescriptor;
@@ -79,7 +80,7 @@ public class SagaAnnotationPostProcessor
         try {
             metadata.inject(bean,beanName,pvs);
         } catch (Throwable throwable) {
-            throw new SagaWrapperException("creation or injection of proxy object fail");
+            throw new SagaWrapperException("creation or injection of proxy object failed");
         }
         return pvs;
     }
@@ -111,7 +112,7 @@ public class SagaAnnotationPostProcessor
     }
 
     private Object doCreateProxy(SagaAction sagaAction, java.lang.reflect.Method[] methods, Object object){
-
+        //todo do validate rollback
         Method[] methods_ = sagaAction!=null?sagaAction.methods():null;
         Class<?> clazz = object.getClass();
         Enhancer enhancer = new Enhancer();
@@ -168,14 +169,26 @@ public class SagaAnnotationPostProcessor
                 SagaTransaction.Rollback rollback = rollbacks.pop();
                 java.lang.reflect.Method method1 = ReflectionUtils.findMethod(rollback.getClazz(),rollback.getMethodName());
                 if(method1!=null){
+                    if(!method1.getReturnType().equals(int.class)){
+                        rollback.setState(SagaTransaction.Rollback.FAIL);
+                        throw new SagaWrapperException("the returnType of a rollback method should be int");
+                    }
                     ReflectionUtils.makeAccessible(method1);
                     Parameter[] parameters = method1.getParameters();
+                    int response;
+                    rollback.setState(SagaTransaction.Rollback.PROCESSING);
                     if(parameters.length>0){
-                        ReflectionUtils.invokeMethod(method1,rollback.getTarget(),rollback.getArgs());
+                        response = (int)Optional.ofNullable(ReflectionUtils.invokeMethod(method1,rollback.getTarget(),rollback.getArgs())).orElse(0);
                     }else{
-                        ReflectionUtils.invokeMethod(method1,rollback.getTarget());
+                        response = (int)Optional.ofNullable(ReflectionUtils.invokeMethod(method1,rollback.getTarget())).orElse(0);
+                    }
+                    if(response==0){
+                        rollback.setState(SagaTransaction.Rollback.FAIL);
+                        //todo here need change to retry rollback process for 3 times instead of breaking the circle
+                        break;
                     }
                 }else{
+                    rollback.setState(SagaTransaction.Rollback.FAIL);
                     throw new SagaWrapperException("no rollback method found");
                 }
             }
@@ -223,6 +236,7 @@ public class SagaAnnotationPostProcessor
     }
 
     private void addRollback(Class<?> beanType, String methodName, Object[] args, Object obj){
+
         SagaTransaction.Rollback rollback = new SagaTransaction.Rollback();
         rollback.setArgs(args);
         rollback.setClazz(beanType);

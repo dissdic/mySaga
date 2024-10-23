@@ -37,6 +37,14 @@ public class SagaTransaction {
         private Object[] args;
 
         private Object target;
+        //回滚状态
+        private int state;
+
+        public final static int PROCESSING = 1;
+
+        public final static int SUCCESS = 2;
+
+        public final static int FAIL = 2;
 
         public Class<?> getClazz() {
             return clazz;
@@ -70,5 +78,12 @@ public class SagaTransaction {
             this.target = target;
         }
 
+        public int getState() {
+            return state;
+        }
+
+        public void setState(int state) {
+            this.state = state;
+        }
     }
 }

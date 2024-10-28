@@ -10,11 +10,15 @@ import org.springframework.core.type.AnnotationMetadata;
 import org.springframework.util.ClassUtils;
 
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class SagaActionRegistrar implements ImportBeanDefinitionRegistrar {
 
     @Override
     public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry) {
+
+        ExecutorService service = Executors.newFixedThreadPool(1);
 
         //注册beanPostProcessor
         Map<String,Object> attributes = importingClassMetadata.getAnnotationAttributes(EnableSaga.class.getName());

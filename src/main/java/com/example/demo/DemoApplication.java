@@ -7,7 +7,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-@EnableSaga
+@EnableSaga(basePackages = "com.example.demo.distributedTransaction.rpc.external")
 @EnableDubbo
 public class DemoApplication {
 

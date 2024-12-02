@@ -20,7 +20,7 @@ public class Service {
     private ServerConfig serverConfig;
 
     @SagaAction(methods = {@Method(name = "addArbitraryUser",rollbackMethodFullName = "removeUser")})
-    @DubboReference(url="dubbo://127.0.0.1:12345",version = "1.0.0")
+    @DubboReference(url="dubbo://127.0.0.1:1234",version = "1.0.0")
     private UserService userService;
 
     @DubboReference(url="dubbo://127.0.0.1:1234",version = "1.0.0")

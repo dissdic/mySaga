@@ -1,5 +1,6 @@
 package com.example.demo.distributedTransaction.saga;
 
+import com.example.demo.distributedTransaction.rpc.external.TestExternal;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.MutablePropertyValues;
 import org.springframework.beans.PropertyValue;
@@ -44,7 +45,7 @@ public class SagaAnnotationPostProcessor
 
     private Set<String> packages;
 
-    private static ThreadLocal<SagaTransaction> actions;
+    private static final ThreadLocal<SagaTransaction> actions = new ThreadLocal<>();
 
     public SagaAnnotationPostProcessor(Collection<String> packages) {
         this.packages  = new LinkedHashSet<>(packages);
@@ -52,7 +53,7 @@ public class SagaAnnotationPostProcessor
 
     @Override
     public void afterPropertiesSet() throws Exception {
-        System.out.println("all the properties have been set");
+        System.out.println("解析器初始化完成");
     }
 
 
@@ -64,7 +65,7 @@ public class SagaAnnotationPostProcessor
 
     @Override
     public void destroy() throws Exception {
-        System.out.println("destroy processor");
+        System.out.println("解析器销毁");
     }
 
 

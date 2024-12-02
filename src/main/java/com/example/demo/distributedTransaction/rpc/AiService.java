@@ -1,5 +1,6 @@
 package com.example.demo.distributedTransaction.rpc;
 
+import com.example.demo.distributedTransaction.rpc.external.TestExternal;
 import com.example.demo.distributedTransaction.saga.Method;
 import com.example.demo.distributedTransaction.saga.SagaAction;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +12,9 @@ public class AiService {
 
     @Autowired
     private ChildService childService;
+
+//    @Autowired
+//    private TestExternal testExternal;
 
     public String ask(String question){
         System.out.println("子属性："+childService);
